@@ -825,7 +825,7 @@ class topk(Operation):
             raise ValueError(msg.format(k, axis))
 
         ret_shape = list(x_shape)
-        ret_shape[axis] = k
+        ret_shape[axis] = x_shape[axis] if k == -1 else k
         return types.tensor(x_type, ret_shape), types.tensor(types.int32, ret_shape)
 
     @precondition(allow=VALUE)
@@ -834,7 +834,7 @@ class topk(Operation):
         if not self.ascending.val:
             indices = np.argsort(-self.x.val, axis=self.axis.val)
         slc = [slice(None)] * self.x.rank
-        slc[self.axis.val] = slice(0, self.k.val)
+        slc[self.axis.val] = slice(0, None if self.k.val == -1 else self.k.val)
         indices = indices[tuple(slc)]
         values = np.take_along_axis(self.x.val, indices, axis=self.axis.val)
         return values, indices

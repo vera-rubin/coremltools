@@ -8,6 +8,7 @@ import itertools
 import numpy as np
 import pytest
 
+import coremltools as ct
 from coremltools.converters.mil.mil import Builder as mb
 from coremltools.converters.mil.mil import types
 from coremltools.converters.mil.mil.ops.tests.iOS17 import backends
@@ -16,6 +17,64 @@ from coremltools.converters.mil.testing_reqs import compute_units
 
 
 class TestTopK:
+    @pytest.mark.parametrize("axis", [0, -1])
+    @pytest.mark.parametrize("ascending", [False, True])
+    @pytest.mark.parametrize("return_indices", [False, True])
+    def test_builder_eval_k_minus_one(self, axis, ascending, return_indices):
+        x_val = np.array([[5, 2, 9, 1], [3, 8, 4, 6]], dtype=np.float32)
+        expected_indices = np.array([[2, 0, 1, 3], [1, 3, 2, 0]], dtype=np.int32)
+        expected_values = np.array([[9, 5, 2, 1], [8, 6, 4, 3]], dtype=np.float32)
+        if ascending:
+            expected_indices = expected_indices[:, ::-1]
+            expected_values = expected_values[:, ::-1]
+        if axis == 0:
+            x_val = x_val.T
+            expected_values, expected_indices = expected_values.T, expected_indices.T
+
+        @mb.program(input_specs=[], opset_version=ct.target.iOS17)
+        def prog():
+            return mb.topk(
+                x=x_val, k=-1, axis=axis, ascending=ascending, return_indices=return_indices
+            )
+
+        for output in prog.functions["main"].outputs:
+            assert output.shape == x_val.shape
+
+        converted = ct.convert(
+            prog, convert_to="milinternal", minimum_deployment_target=ct.target.iOS17
+        )
+        outputs = converted.functions["main"].outputs
+        np.testing.assert_array_equal(outputs[0].val, expected_values)
+        if return_indices:
+            np.testing.assert_array_equal(outputs[1].val, expected_indices)
+
+    @pytest.mark.parametrize(
+        "compute_unit, backend, axis, ascending",
+        itertools.product(compute_units, backends, [0, -1], [False, True]),
+    )
+    def test_ios17_k_minus_one(self, compute_unit, backend, axis, ascending):
+        val = np.array([[5, 2, 9, 1], [3, 8, 4, 6]], dtype=np.float32)
+        expected_values = np.array([[9, 5, 2, 1], [8, 6, 4, 3]], dtype=np.float32)
+        expected_indices = np.array([[2, 0, 1, 3], [1, 3, 2, 0]], dtype=np.int32)
+        if ascending:
+            expected_values = expected_values[:, ::-1]
+            expected_indices = expected_indices[:, ::-1]
+        if axis == 0:
+            val, expected_values, expected_indices = val.T, expected_values.T, expected_indices.T
+
+        def build(x):
+            return mb.topk(x=x, k=-1, axis=axis, ascending=ascending)
+
+        run_compare_builder(
+            build,
+            {"x": mb.placeholder(shape=val.shape)},
+            {"x": val},
+            [(*val.shape, types.fp32), (*val.shape, types.int32)],
+            [expected_values, expected_indices],
+            compute_unit=compute_unit,
+            backend=backend,
+        )
+
     @pytest.mark.parametrize(
         "compute_unit, backend, x_dtype, k_dtype",
         itertools.product(
